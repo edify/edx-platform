@@ -1,11 +1,16 @@
-from django.conf import settings
-from xmodule.modulestore import Location
-from xmodule.modulestore.django import modulestore
-from xmodule.modulestore.exceptions import ItemNotFoundError
-from django.core.urlresolvers import reverse
 import copy
 import logging
 import re
+import json
+from functools import wraps
+
+from django.conf import settings
+from django.core.urlresolvers import reverse
+from django.http import HttpResponse
+
+from xmodule.modulestore import Location
+from xmodule.modulestore.django import modulestore
+from xmodule.modulestore.exceptions import ItemNotFoundError
 from xmodule.modulestore.draft import DIRECT_ONLY_CATEGORIES
 
 log = logging.getLogger(__name__)
@@ -255,3 +260,26 @@ def remove_extra_panel_tab(tab_type, course):
         course_tabs = [ct for ct in course_tabs if ct != tab_panel]
         changed = True
     return changed, course_tabs
+
+
+def return_ajax_status(view_function):
+    """Except, that view function return True/False, and convert
+    response to JSON HTTP response:
+        {"status": "succes"} or {"status": "fail"}
+    """
+    @wraps(view_function)
+    def new_view_function(request, *args, **kwargs):
+        """New view functions for decorator result."""
+        status = view_function(request, *args, **kwargs)
+        response_data = {
+            'status': 'success' if status else 'fail'
+        }
+        return HttpResponse(
+            json.dumps(response_data),
+            content_type="application/json")
+    return new_view_function
+
+
+def download_youtube_subs(youtube_ids):
+    """Download subtitles from Youtube using `youtube_ids`."""
+    return True

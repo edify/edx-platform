@@ -1,5 +1,8 @@
+"""Views for items (modules)."""
+
 import json
 from uuid import uuid4
+from lxml import etree
 
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
@@ -8,13 +11,14 @@ from django.contrib.auth.decorators import login_required
 from xmodule.modulestore import Location
 from xmodule.modulestore.django import modulestore
 from xmodule.modulestore.inheritance import own_metadata
+from xmodule.modulestore.exceptions import ItemNotFoundError
 
 from util.json_request import expect_json
-from ..utils import get_modulestore
+from ..utils import get_modulestore, download_youtube_subs, return_ajax_status
 from .access import has_access
 from .requests import _xmodule_recurse
 
-__all__ = ['save_item', 'clone_item', 'delete_item']
+__all__ = ['save_item', 'clone_item', 'delete_item', 'import_subtitles']
 
 # cdodge: these are categories which should not be parented, they are detached from the hierarchy
 DETACHED_CATEGORIES = ['about', 'static_tab', 'course_info']
@@ -23,6 +27,7 @@ DETACHED_CATEGORIES = ['about', 'static_tab', 'course_info']
 @login_required
 @expect_json
 def save_item(request):
+    """View saving items."""
     item_location = request.POST['id']
 
     # check permissions for this user within this course
@@ -71,9 +76,54 @@ def save_item(request):
     return HttpResponse()
 
 
+@expect_json
+@return_ajax_status
+def import_subtitles(request):
+    """This view tries to import subtitles from Youtube for current
+    video and videoalpha modules."""
+    item_location = request.POST.get('id')
+    if not item_location:
+        return False
+
+    # # check permissions for this user within this course
+    # if not has_access(request.user, item_location):
+    #     raise PermissionDenied()
+
+    try:
+        item = modulestore().get_item(item_location)
+    except ItemNotFoundError:
+        # Can't find item by location.
+        return False
+
+    if item.category not in ['video', 'videoalpha']:
+        return False
+
+    try:
+        xmltree = etree.fromstring(item.data)
+    except etree.XMLSyntaxError:
+        # Can't parse source XML.
+        return False
+
+    youtube = xmltree.get('youtube')
+    if not youtube:
+        # Missing or blank "youtube" attribute.
+        return False
+
+    try:
+        youtube_ids = [i.split(':')[1] for i in youtube.split(',')]
+    except IndexError:
+        # if after splitting by ':' we have one item (missing ':' in
+        # the "youtube" attribute value).
+        return False
+
+    status = download_youtube_subs(youtube_ids)
+    return status
+
+
 @login_required
 @expect_json
 def clone_item(request):
+    """View for cloning items."""
     parent_location = Location(request.POST['parent_location'])
     template = Location(request.POST['template'])
 
@@ -102,6 +152,7 @@ def clone_item(request):
 @login_required
 @expect_json
 def delete_item(request):
+    """View for removing items."""
     item_location = request.POST['id']
     item_loc = Location(item_location)
 
